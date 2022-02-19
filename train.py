@@ -106,6 +106,12 @@ def run(rank, n_gpus, hps):
   except:
     epoch_str = 1
     global_step = 0
+  
+  if len(hps.pt_path) > 1 and global_step == 0:
+    logger.info(f"Trying to load pretrained weights from {hps.pt_path}")
+    _, _, _, s_ = utils.load_checkpoint(utils.latest_checkpoint_path(hps.pt_path, "G_*.pth"), net_g, None)
+    _, _, _, s_ = utils.load_checkpoint(utils.latest_checkpoint_path(hps.pt_path, "D_*.pth"), net_d, None)
+    
 
   scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
   scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)

@@ -156,9 +156,14 @@ def get_hparams(init=True):
                       help='JSON file for configuration')
   parser.add_argument('-m', '--model', type=str, required=True,
                       help='Model name')
+  parser.add_argument('-p', '--pretrained', type=str, default="",
+                      help='Pretrained checkpoint FOLDER name where G_something and D_something.pth are present')
+
   
   args = parser.parse_args()
   model_dir = os.path.join("./logs", args.model)
+  pt_path = args.pretrained
+
 
   if not os.path.exists(model_dir):
     os.makedirs(model_dir)
@@ -177,6 +182,7 @@ def get_hparams(init=True):
   
   hparams = HParams(**config)
   hparams.model_dir = model_dir
+  hparams.pt_path = pt_path
   return hparams
 
 
