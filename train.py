@@ -108,7 +108,8 @@ def run(rank, n_gpus, hps):
     global_step = 0
   
   if len(hps.pt_path) > 1 and global_step == 0:
-    logger.info(f"Trying to load pretrained weights from {hps.pt_path}")
+    if rank == 0:
+        logger.info(f"Trying to load pretrained weights from {hps.pt_path}")
     _, _, _, s_ = utils.load_checkpoint(utils.latest_checkpoint_path(hps.pt_path, "G_*.pth"), net_g, None)
     _, _, _, s_ = utils.load_checkpoint(utils.latest_checkpoint_path(hps.pt_path, "D_*.pth"), net_d, None)
     
