@@ -97,7 +97,7 @@ def run(rank, n_gpus, hps):
       hps.train.learning_rate, 
       betas=hps.train.betas, 
       eps=hps.train.eps)
-  net_g = DDP(net_g, device_ids=[rank])
+  net_g = DDP(net_g, device_ids=[rank],find_unused_parameters=True)
   net_d = DDP(net_d, device_ids=[rank])
 
   try:

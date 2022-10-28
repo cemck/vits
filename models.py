@@ -57,7 +57,7 @@ class StochasticDurationPredictor(nn.Module):
 
     if lse is not None:
       lse = torch.detach(lse)
-      x = x + self.cond(lse)
+      x = x + self.lse_cond(lse)
 
     x = self.convs(x, x_mask)
     x = self.proj(x) * x_mask
@@ -529,10 +529,9 @@ class SynthesizerTrn(nn.Module):
     else:
       lse = None
 
-    if self.use_sdp:
-      logw = self.dp(x, x_mask, g=g,lse=lse, reverse=True, noise_scale=noise_scale_w)
-    else:
-      logw = self.dp(x, x_mask, g=g)
+
+    logw = self.dp(x, x_mask, g=g,lse=lse, reverse=True, noise_scale=noise_scale_w)
+
 
     w = torch.exp(logw) * x_mask * length_scale
     w_ceil = torch.ceil(w)
