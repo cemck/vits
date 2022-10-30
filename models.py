@@ -550,7 +550,7 @@ class SynthesizerTrn(nn.Module):
 
   # HURR DURR COPYING FUNCTIONS LE BAD
   # TorchScript tracing mysteries
-  def infer_ts(self, x, x_lengths, length_scale=1,sid=None,lse=None,noise_scale=.667,noise_scale_w=0.8, max_len=None):
+  def infer_ts(self, x, x_lengths, length_scale=1,sid=None,emid=None,noise_scale=.667,noise_scale_w=0.8, max_len=None):
     x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
     if self.n_speakers > 0:
       g = self.emb_g(sid).unsqueeze(-1) # [b, h, 1]
