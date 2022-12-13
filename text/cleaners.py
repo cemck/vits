@@ -17,6 +17,7 @@ from unidecode import unidecode
 from phonemizer import phonemize
 import phonemizer
 global_phonemizer = phonemizer.backend.EspeakBackend(language='en-us', preserve_punctuation=True,  with_stress=True)
+spanish_phonemizer = phonemizer.backend.EspeakBackend(language='es', preserve_punctuation=True,  with_stress=True)
 
 
 
@@ -99,6 +100,15 @@ def english_cleaners2(text):
   text = lowercase(text)
   text = expand_abbreviations(text)
   phonemes = global_phonemizer.phonemize([text], strip=True, njobs=1)
+  phonemes = phonemes[0]
+  phonemes = collapse_whitespace(phonemes)
+  return phonemes
+
+
+def spanish_cleaners(text):
+  '''Pipeline for Spanish text, punctuation + stress'''
+  text = lowercase(text)
+  phonemes = spanish_phonemizer.phonemize([text], strip=True, njobs=1)
   phonemes = phonemes[0]
   phonemes = collapse_whitespace(phonemes)
   return phonemes
