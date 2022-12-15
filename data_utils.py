@@ -9,7 +9,7 @@ import commons
 from mel_processing import spectrogram_torch
 from utils import load_wav_to_torch, load_filepaths_and_text
 from text import text_to_sequence, cleaned_text_to_sequence
-
+import librosa
 
 class TextAudioLoader(torch.utils.data.Dataset):
     """
@@ -48,12 +48,19 @@ class TextAudioLoader(torch.utils.data.Dataset):
 
         audiopaths_and_text_new = []
         lengths = []
+        n_fau = 0
         for audiopath, text in self.audiopaths_and_text:
+            au_len = librosa.get_duration(filename=audiopath)
+            if au_len > 7.0:
+                n_fau += 1
+                continue
+                
             if self.min_text_len <= len(text) and len(text) <= self.max_text_len:
                 audiopaths_and_text_new.append([audiopath, text])
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
         self.audiopaths_and_text = audiopaths_and_text_new
         self.lengths = lengths
+        print(f"{n_fau} removed due to too long")
 
     def get_audio_text_pair(self, audiopath_and_text):
         # separate filename and text

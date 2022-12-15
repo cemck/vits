@@ -28,7 +28,7 @@
     "n_mel_channels": 80,
     "mel_fmin": 20,
     "mel_fmax": 11025,
-    "add_blank": false,
+    "add_blank": true,
     "n_speakers": 0,
     "cleaned_text": true
   },
