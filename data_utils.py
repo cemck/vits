@@ -49,7 +49,14 @@ class TextAudioLoader(torch.utils.data.Dataset):
         audiopaths_and_text_new = []
         lengths = []
         n_fau = 0
-        for audiopath, text in self.audiopaths_and_text:
+        
+        for current in self.audiopaths_and_text:
+            try:
+                audiopath, text = current
+            except:
+                print(f"{current} failed")
+                continue
+            
             au_len = librosa.get_duration(filename=audiopath)
             if au_len > 7.0:
                 n_fau += 1
