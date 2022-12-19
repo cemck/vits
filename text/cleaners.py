@@ -109,6 +109,6 @@ def spanish_cleaners(text):
   '''Pipeline for Spanish text, punctuation + stress'''
   text = lowercase(text)
   phonemes = spanish_phonemizer.phonemize([text], strip=True, njobs=1)
-  phonemes = phonemes[0]
+  phonemes = phonemes[0].replace("(es)","").replace("(en)","")
   phonemes = collapse_whitespace(phonemes)
   return phonemes
