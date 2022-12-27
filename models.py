@@ -12,6 +12,7 @@ import monotonic_align
 from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from commons import init_weights, get_padding
+from modules import PQMF, CoMBD, SubBandDiscriminator
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -242,7 +243,7 @@ class PosteriorEncoder(nn.Module):
 
 
 class Generator(torch.nn.Module):
-    def __init__(self, initial_channel, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=0):
+    def __init__(self, initial_channel, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gen_istft_n_fft, gin_channels=0):
         super(Generator, self).__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
@@ -260,9 +261,14 @@ class Generator(torch.nn.Module):
             ch = upsample_initial_channel//(2**(i+1))
             for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
                 self.resblocks.append(resblock(ch, k, d))
-
-        self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
+        
+        
+        self.post_n_fft = gen_istft_n_fft
+        self.conv_post = Conv1d(ch, self.post_n_fft + 2, 7, 1, padding=3)
         self.ups.apply(init_weights)
+        self.reflection_pad = torch.nn.ReflectionPad1d((1, 0))
+        
+        self.out_proj_x1 = Conv1d(upsample_initial_channel // 4, 1, 7, 1, padding=3)
 
         if gin_channels != 0:
             self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
@@ -282,11 +288,17 @@ class Generator(torch.nn.Module):
                 else:
                     xs += self.resblocks[i*self.num_kernels+j](x)
             x = xs / self.num_kernels
+            if i == 1:
+                x1 = self.out_proj_x1(x)
+            # elif i == 2:
+            #     x2 = self.out_proj_x2(x)
         x = F.leaky_relu(x)
+        x = self.reflection_pad(x)
         x = self.conv_post(x)
-        x = torch.tanh(x)
+        spec = torch.exp(x[:,:self.post_n_fft // 2 + 1, :])
+        phase = torch.sin(x[:, self.post_n_fft // 2 + 1:, :])
 
-        return x
+        return spec, phase, x1 #, x2
 
     def remove_weight_norm(self):
         print('Removing weight norm...')
@@ -386,6 +398,176 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
 
+class MultiScaleDiscriminator(torch.nn.Module):
+    def __init__(self):
+        super(MultiScaleDiscriminator, self).__init__()
+        self.discriminators = nn.ModuleList([
+            DiscriminatorS(use_spectral_norm=True),
+            DiscriminatorS(),
+            DiscriminatorS(),
+        ])
+        self.meanpools = nn.ModuleList([
+            AvgPool1d(4, 2, padding=2),
+            AvgPool1d(4, 2, padding=2)
+        ])
+
+    def forward(self, y, y_hat):
+        y_d_rs = []
+        y_d_gs = []
+        fmap_rs = []
+        fmap_gs = []
+        for i, d in enumerate(self.discriminators):
+            if i != 0:
+                y = self.meanpools[i-1](y)
+                y_hat = self.meanpools[i-1](y_hat)
+            y_d_r, fmap_r = d(y)
+            y_d_g, fmap_g = d(y_hat)
+            y_d_rs.append(y_d_r)
+            fmap_rs.append(fmap_r)
+            y_d_gs.append(y_d_g)
+            fmap_gs.append(fmap_g)
+
+        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+
+
+class MultiCoMBDiscriminator(torch.nn.Module):
+
+    def __init__(self, kernels, channels, groups, strides):
+        super(MultiCoMBDiscriminator, self).__init__()
+        self.combd_1 = CoMBD(filters=channels, kernels=kernels[0], groups=groups, strides=strides)
+        self.combd_2 = CoMBD(filters=channels, kernels=kernels[1], groups=groups, strides=strides)
+        self.combd_3 = CoMBD(filters=channels, kernels=kernels[2], groups=groups, strides=strides)
+
+        self.pqmf_2 = PQMF(N=2, taps=256, cutoff=0.25, beta=10.0)
+        self.pqmf_4 = PQMF(N=4, taps=192, cutoff=0.13, beta=10.0)
+
+    def forward(self, x, x_hat, x1_hat):
+        y = []
+        y_hat = []
+        fmap = []
+        fmap_hat = []
+
+        p3, p3_fmap = self.combd_3(x)
+        y.append(p3)
+        fmap.append(p3_fmap)
+
+        p3_hat, p3_fmap_hat = self.combd_3(x_hat)
+        y_hat.append(p3_hat)
+        fmap_hat.append(p3_fmap_hat)
+
+        #x2_ = self.pqmf_2(x)[:, :1, :]  # Select first band
+        x1_ = self.pqmf_4(x)[:, :1, :]  # Select first band
+
+        #x2_hat_ = self.pqmf_2(x_hat)[:, :1, :]
+        x1_hat_ = self.pqmf_4(x_hat)[:, :1, :]
+
+        # p2_, p2_fmap_ = self.combd_2(x2_)
+        # y.append(p2_)
+        # fmap.append(p2_fmap_)
+
+        # p2_hat_, p2_fmap_hat_ = self.combd_2(x2_hat)
+        # y_hat.append(p2_hat_)
+        # fmap_hat.append(p2_fmap_hat_)
+
+        p1_, p1_fmap_ = self.combd_1(x1_)
+        y.append(p1_)
+        fmap.append(p1_fmap_)
+
+        p1_hat_, p1_fmap_hat_ = self.combd_1(x1_hat)
+        y_hat.append(p1_hat_)
+        fmap_hat.append(p1_fmap_hat_)
+
+
+        # p2, p2_fmap = self.combd_2(x2_)
+        # y.append(p2)
+        # fmap.append(p2_fmap)
+        #
+        # p2_hat, p2_fmap_hat = self.combd_2(x2_hat_)
+        # y_hat.append(p2_hat)
+        # fmap_hat.append(p2_fmap_hat)
+
+        p1, p1_fmap = self.combd_1(x1_)
+        y.append(p1)
+        fmap.append(p1_fmap)
+
+        p1_hat, p1_fmap_hat = self.combd_1(x1_hat_)
+        y_hat.append(p1_hat)
+        fmap_hat.append(p1_fmap_hat)
+
+        return y, y_hat, fmap, fmap_hat
+
+class MultiSubBandDiscriminator(torch.nn.Module):
+
+    def __init__(self, tkernels, fkernel, tchannels, fchannels, tstrides, fstride, tdilations, fdilations, tsubband,
+                 n, m, freq_init_ch):
+
+        super(MultiSubBandDiscriminator, self).__init__()
+
+        self.fsbd = SubBandDiscriminator(init_channel=freq_init_ch, channels=fchannels, kernel=fkernel,
+                                         strides=fstride, dilations=fdilations)
+
+        self.tsubband1 = tsubband[0]
+        self.tsbd1 = SubBandDiscriminator(init_channel=self.tsubband1, channels=tchannels, kernel=tkernels[0],
+                                          strides=tstrides[0], dilations=tdilations[0])
+
+        self.tsubband2 = tsubband[1]
+        self.tsbd2 = SubBandDiscriminator(init_channel=self.tsubband2, channels=tchannels, kernel=tkernels[1],
+                                          strides=tstrides[1], dilations=tdilations[1])
+
+        self.tsubband3 = tsubband[2]
+        self.tsbd3 = SubBandDiscriminator(init_channel=self.tsubband3, channels=tchannels, kernel=tkernels[2],
+                                          strides=tstrides[2], dilations=tdilations[2])
+
+
+        self.pqmf_n = PQMF(N=n, taps=256, cutoff=0.03, beta=10.0)
+        self.pqmf_m = PQMF(N=m, taps=256, cutoff=0.1, beta=9.0)
+
+    def forward(self, x, x_hat):
+        fmap = []
+        fmap_hat = []
+        y = []
+        y_hat = []
+
+        # Time analysis
+        xn = self.pqmf_n(x)
+        xn_hat = self.pqmf_n(x_hat)
+
+        q3, feat_q3 = self.tsbd3(xn[:, :self.tsubband3, :])
+        q3_hat, feat_q3_hat = self.tsbd3(xn_hat[:, :self.tsubband3, :])
+        y.append(q3)
+        y_hat.append(q3_hat)
+        fmap.append(feat_q3)
+        fmap_hat.append(feat_q3_hat)
+
+        q2, feat_q2 = self.tsbd2(xn[:, :self.tsubband2, :])
+        q2_hat, feat_q2_hat = self.tsbd2(xn_hat[:, :self.tsubband2, :])
+        y.append(q2)
+        y_hat.append(q2_hat)
+        fmap.append(feat_q2)
+        fmap_hat.append(feat_q2_hat)
+
+        q1, feat_q1 = self.tsbd1(xn[:, :self.tsubband1, :])
+        q1_hat, feat_q1_hat = self.tsbd1(xn_hat[:, :self.tsubband1, :])
+        y.append(q1)
+        y_hat.append(q1_hat)
+        fmap.append(feat_q1)
+        fmap_hat.append(feat_q1_hat)
+
+        # Frequency analysis
+        xm = self.pqmf_m(x)
+        xm_hat = self.pqmf_m(x_hat)
+
+        xm = xm.transpose(-2, -1)
+        xm_hat = xm_hat.transpose(-2, -1)
+
+        q4, feat_q4 = self.fsbd(xm)
+        q4_hat, feat_q4_hat = self.fsbd(xm_hat)
+        y.append(q4)
+        y_hat.append(q4_hat)
+        fmap.append(feat_q4)
+        fmap_hat.append(feat_q4_hat)
+
+        return y, y_hat, fmap, fmap_hat
 
 class SynthesizerTrn(nn.Module):
   """
@@ -412,6 +594,8 @@ class SynthesizerTrn(nn.Module):
     n_speakers=0,
     gin_channels=0,
     use_sdp=True,
+    gen_istft_n_fft,
+    gen_istft_hop_size,
     **kwargs):
 
     super().__init__()
@@ -433,6 +617,8 @@ class SynthesizerTrn(nn.Module):
     self.segment_size = segment_size
     self.n_speakers = n_speakers
     self.gin_channels = gin_channels
+    self.gen_istft_n_fft = gen_istft_n_fft
+    self.gen_istft_hop_size = gen_istft_hop_size
 
     self.use_sdp = use_sdp
 
@@ -444,10 +630,13 @@ class SynthesizerTrn(nn.Module):
         n_layers,
         kernel_size,
         p_dropout)
-    self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=gin_channels)
+    self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gen_istft_n_fft, gin_channels=gin_channels)
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.aligner = modules.AlignmentEncoder(n_mel_channels=80, n_text_channels=hidden_channels, n_att_channels=80, temperature=0.0005)
+    self.stft = TorchSTFT(self.gen_istft_n_fft, hop_length= self.gen_istft_hop_size,
+                     win_length=self.gen_istft_n_fft)
+                  
     self.symbol_emb = self.enc_p.emb
 
     if use_sdp:
@@ -501,8 +690,11 @@ class SynthesizerTrn(nn.Module):
     logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
 
     z_slice, ids_slice = commons.rand_slice_segments(z, y_lengths, self.segment_size)
-    o = self.dec(z_slice, g=g)
-    return o, l_length, attn, attn_logprob, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
+    
+    spec, phase, x1 = self.dec(z_slice, g=g)
+    
+    o = self.stft.inverse(spec, phase)
+    return o, x1, l_length, attn, attn_logprob, ids_slice, x_mask, y_mask, (z, z_p, m_p, logs_p, m_q, logs_q)
 
   def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None):
     x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
@@ -527,7 +719,10 @@ class SynthesizerTrn(nn.Module):
 
     z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
     z = self.flow(z_p, y_mask, g=g, reverse=True)
-    o = self.dec((z * y_mask)[:,:,:max_len], g=g)
+    
+    spec, phase, x1 = self.dec((z * y_mask)[:,:,:max_len], g=g)
+    o = self.stft.inverse(spec, phase)
+    
     return o, attn, y_mask, (z, z_p, m_p, logs_p)
 
   # HURR DURR COPYING FUNCTIONS LE BAD
