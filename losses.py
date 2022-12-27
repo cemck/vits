@@ -54,6 +54,11 @@ def feature_loss(fmap_r, fmap_g):
     for rl, gl in zip(dr, dg):
       rl = rl.float().detach()
       gl = gl.float()
+        
+      # fix last 1024 != 2048 after mcmbd
+      if gl.size()[-1] != rl.size()[-1]:
+        gl = gl.repeat(1,1,2)
+        
       loss += torch.mean(torch.abs(rl - gl))
 
   return loss * 2 

@@ -107,7 +107,7 @@ def run(rank, n_gpus, hps):
       betas=hps.train.betas, 
       eps=hps.train.eps)
   net_g = DDP(net_g, device_ids=[rank])
-  mcmbd = DDP(mcmbd, device_ids=[rank])
+  mcmbd = DDP(mcmbd, device_ids=[rank],find_unused_parameters=True)
   msbd = DDP(msbd, device_ids=[rank])
 
   try:
@@ -218,7 +218,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
         loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
 
-        
+
         loss_fm_f = 2 * feature_loss(fmap_f_r, fmap_f_g)
         loss_fm_s = 2 * feature_loss(fmap_s_r, fmap_s_g)
         loss_fm = loss_fm_f + loss_fm_s
