@@ -14,6 +14,7 @@ from commons import init_weights, get_padding
 from transforms import piecewise_rational_quadratic_transform
 from typing import Optional, Tuple
 from numba import jit, prange
+from scipy import signal as sig
 
 LRELU_SLOPE = 0.1
 

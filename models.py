@@ -13,7 +13,7 @@ from torch.nn import Conv1d, ConvTranspose1d, AvgPool1d, Conv2d
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 from commons import init_weights, get_padding
 from modules import PQMF, CoMBD, SubBandDiscriminator
-
+from stft import TorchSTFT
 
 class StochasticDurationPredictor(nn.Module):
   def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, n_flows=4, gin_channels=0):
@@ -594,8 +594,8 @@ class SynthesizerTrn(nn.Module):
     n_speakers=0,
     gin_channels=0,
     use_sdp=True,
-    gen_istft_n_fft,
-    gen_istft_hop_size,
+    gen_istft_n_fft=16,
+    gen_istft_hop_size=4,
     **kwargs):
 
     super().__init__()

@@ -48,7 +48,7 @@
     "upsample_kernel_sizes": [16,16],
     "n_layers_q": 3,
     "use_spectral_norm": false,
-    "gen_istft_n_fft" : 32
+    "gen_istft_n_fft" : 32,
     "gen_istft_hop_size": 8
   },
   "disc": {
@@ -68,6 +68,6 @@
     "pqmf_n" : 16,
     "pqmf_m" : 64,
     "freq_init_ch" : 128,
-    "tsubband" : [6, 11, 16],
-  },
+    "tsubband" : [6, 11, 16]
+  }
 }
