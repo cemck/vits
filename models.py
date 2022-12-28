@@ -750,7 +750,10 @@ class SynthesizerTrn(nn.Module):
 
     z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
     z = self.flow(z_p, y_mask, g=g, reverse=True)
-    o = self.dec((z * y_mask)[:,:,:max_len], g=g)
+    
+    spec, phase, x1 = self.dec((z * y_mask)[:,:,:max_len], g=g)
+    o = self.stft.inverse(spec, phase)
+    
     return o, attn
 
   def voice_conversion(self, y, y_lengths, sid_src, sid_tgt):
